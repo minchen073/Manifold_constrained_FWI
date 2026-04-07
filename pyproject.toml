@@ -1,0 +1,51 @@
+[project]
+name = "minchen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=1.13.0",
+    "blobfile>=3.1.0",
+    "click>=8.3.1",
+    "cupy-cuda13x>=13.0.0",
+    "deepwave>=0.0.26",
+    "diffusers>=0.37.1",
+    "einops>=0.8.1",
+    "geomloss>=0.2.6",
+    "grain>=0.2.15",
+    "imageio>=2.37.3",
+    "ipywidgets>=8.1.8",
+    "langchain>=1.2.0",
+    "langchain-openai>=1.1.6",
+    "lmdb>=1.7.5",
+    "matplotlib>=3.5.0",
+    "mpi4py>=4.1.1",
+    "numpy>=1.21.0",
+    "omegaconf>=2.1.0",
+    "open-clip-torch>=3.2.0",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.3.3",
+    "pillow>=12.0.0",
+    "piq>=0.8.0",
+    "pot>=0.8.0",
+    "pyrallis>=0.3.1",
+    "pytorch-lightning==1.5.0",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.7.0",
+    "tensorboard>=2.18.0",
+    "tensorflow>=2.18.1",
+    "tensorflow-datasets>=4.9.9",
+    "torch>=1.13.1",
+    "torchdiffeq>=0.2.0",
+    "torchvision>=0.14.1",
+    "tqdm>=4.62.0",
+    "transformers>=4.57.3",
+    "xformer>=1.0.1",
+    "xformers>=0.0.27.post2",
+]
+
+[tool.uv.workspace]
+members = [
+    "repos/diffusion-posterior-sampling-main",
+]

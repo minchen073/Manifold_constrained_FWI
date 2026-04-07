@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# uv / 虚拟环境
+.venv/
+.uv/
+
+# 数据集（通常很大）
+data/
+
+# 预训练模型权重
+pretrained_model/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.h5
+*.pkl
+
+# 训练输出（checkpoints、tensorboard logs 等）
+training/runs/
+
+# 实验输出（生成的图像、npy 结果等）
+exp/*/demo_output/
+exp/test_generation/
+
+# 日志
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 系统
+.DS_Store
+Thumbs.db

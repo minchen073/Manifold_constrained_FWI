@@ -1,0 +1,125 @@
+# =============================================================================
+# Curvevel-B DDPM 训练：本文件为自包含完整配置（不依赖 CurveVelB 目录下的 JSON）。
+# 路径均相对于 Manifold_constrained_FWI/training/ 解析。
+# =============================================================================
+
+data:
+  # 数据根目录（相对 training/）：即 Manifold_constrained_FWI/data/Curvevel-B
+  root: "../data/Curvevel-B"
+  train_model_id_range: [1, 48]
+  test_model_id_range: [49, 60]
+  samples_per_file: 500
+  velocity_center_m_s: 3000.0
+  velocity_scale_m_s: 1500.0
+  num_workers: 4
+  pin_memory: true
+
+# UNet：与 diffusers UNet2DModel 的 config.json 字段一致（与 CVB-2000 结构对齐）
+unet:
+  load_pretrained_weights: false
+  # If true: pretrained_weights_path must be model.pt / .pth or a directory containing model.pt (torch.save of OpenFWIUNetWrapper).
+  pretrained_weights_path: null
+  torch_dtype: float32
+  config:
+    _class_name: UNet2DModel
+    _diffusers_version: "0.35.1"
+    act_fn: silu
+    add_attention: true
+    attention_head_dim: 8
+    attn_norm_num_groups: null
+    block_out_channels: [128, 256, 256, 512]
+    center_input_sample: false
+    class_embed_type: null
+    down_block_types:
+      - DownBlock2D
+      - DownBlock2D
+      - AttnDownBlock2D
+      - DownBlock2D
+    downsample_padding: 1
+    downsample_type: conv
+    dropout: 0.0
+    flip_sin_to_cos: true
+    freq_shift: 0
+    in_channels: 1
+    layers_per_block: 2
+    mid_block_scale_factor: 1
+    mid_block_type: UNetMidBlock2D
+    norm_eps: 1.0e-5
+    norm_num_groups: 32
+    num_class_embeds: null
+    num_train_timesteps: null
+    out_channels: 1
+    resnet_time_scale_shift: default
+    sample_size: 72
+    time_embedding_dim: null
+    time_embedding_type: positional
+    up_block_types:
+      - UpBlock2D
+      - UpBlock2D
+      - AttnUpBlock2D
+      - UpBlock2D
+    upsample_type: conv
+
+# DDPM 噪声调度器：与 diffusers DDPMScheduler 的 scheduler_config.json 一致
+noise_scheduler:
+  config:
+    _class_name: DDPMScheduler
+    _diffusers_version: "0.35.1"
+    beta_end: 0.02
+    beta_schedule: linear
+    beta_start: 0.0001
+    clip_sample: true
+    clip_sample_range: 1.0
+    dynamic_thresholding_ratio: 0.995
+    num_train_timesteps: 1000
+    prediction_type: epsilon
+    rescale_betas_zero_snr: false
+    sample_max_value: 1.0
+    steps_offset: 0
+    thresholding: false
+    timestep_spacing: leading
+    trained_betas: null
+    variance_type: fixed_small
+
+training:
+  output_root: "./runs"
+  run_name: "curvevel_b_ddpm"
+  seed: 42
+
+  # 物理 GPU 索引（默认用 3 号卡）。若已设置环境变量 CUDA_VISIBLE_DEVICES 则不再覆盖。
+  cuda_device: 3
+
+  mixed_precision: fp16
+  gradient_accumulation_steps: 1
+
+  batch_size: 32
+  epochs: 500
+  lr: 1.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  adam_epsilon: 1.0e-8
+
+  lr_scheduler_type: cosine
+  lr_warmup_steps: 500
+
+  prediction_type: epsilon
+
+  grad_clip: 1.0
+  log_every: 50
+  val_every: 1
+  save_every: 5
+  save_best: true
+
+  log_with: tensorboard
+  logging_subdir: logs
+
+  use_ema: false
+  ema_inv_gamma: 1.0
+  ema_power: 0.75
+  ema_max_decay: 0.9999
+
+  enable_xformers: false
+
+  accelerator_checkpoint_steps: null
+  checkpoints_total_limit: null
+  resume_from_checkpoint: null

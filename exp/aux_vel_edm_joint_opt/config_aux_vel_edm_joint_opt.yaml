@@ -1,0 +1,107 @@
+# =============================================================================
+# demo_aux_vel_edm_joint_opt.py 配置文件
+#
+# 实验设计：
+#   fwi_tv / fwi_tikhonov — 传统正则化 FWI（对照组）
+#   joint               — 辅助变量 v_aux + 潜变量 z 联合优化
+#                         L = L_wave(v_aux) + λ_coup·MSE(v_gen(z), v_aux)
+#                         无正则化项。
+#
+# 运行（Manifold_constrained_FWI 目录）:
+#   uv run python exp/aux_vel_edm_joint_opt/demo_aux_vel_edm_joint_opt.py \
+#     --config exp/aux_vel_edm_joint_opt/config_aux_vel_edm_joint_opt.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+model:
+  model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0.0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  alpha: 1.0
+
+target:
+  data_path: null   # null → 自动使用 data/Curvevel-B/
+  file_index: 60
+  sample_index: 5
+
+init:
+  smooth_sigma: 10.0
+
+# 联合优化中 z 的初始随机种子
+joint_z:
+  seed: 4242
+
+# 所有实验共享的数据项配置
+fwi_common:
+  loss_type: "mse"   # l1 | mse | l2_sq | w2_per_trace
+  loss_scale: 1.0
+  log_every: 10
+
+# experiments_active: null → 按 experiments_order 与 experiments 的交集运行；
+# 或显式列表，例如 [fwi_tv, joint]
+experiments_active: null
+
+experiments_order:
+  # - fwi_tv
+  # - fwi_tikhonov
+  - joint
+
+experiments:
+  fwi_tv:
+    type: "fwi_tv"
+    iterations: 300
+    lr: 0.03
+    reg_lambda: 0.01
+    cosine_annealing: true
+    eta_min: 0.0
+
+  fwi_tikhonov:
+    type: "fwi_tikhonov"
+    iterations: 300
+    lr: 0.03
+    reg_lambda: 0.01
+    cosine_annealing: true
+    eta_min: 0.0
+
+  joint:
+    type: "joint"
+    iterations: 300
+    lr_v: 0.03
+    lr_z: 0.01
+    coupling_lambda: 0   # λ_coup；设为 0 退化为普通数据驱动 FWI
+    cosine_annealing: true
+    eta_min: 0.0
+    snap_every: 30         # 每隔多少步抓一帧（用于演化子图和 GIF）
+    gif_enabled: true
+
+edm_sampler:
+  num_steps: 4
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+  alpha: 1.0
+  solver: "euler"
+
+w2_per_trace:
+  normalize_type: "softplus"
+  b: 0.1
+
+paths:
+  outdir: "demo_output"
