@@ -1,0 +1,52 @@
+# =============================================================================
+# config_jacobian_analysis.yaml
+#
+# 沿 EDM PF-ODE 采样轨迹，计算去噪器 Jacobian 最大奇异值（谱范数）。
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  rho: 7
+  alpha: 1.0
+
+  train:
+    load_model: true
+    model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+trajectory:
+  num_steps: 20          # ODE 步数（轨迹点数）
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+  solver: "euler"        # euler / heun
+
+power_iteration:
+  num_iter: 30           # 幂迭代步数（越多越精确）
+  num_samples: 3         # 用多个随机初始向量取最大值，减少偶然误差
+
+experiment:
+  num_trajectories: 5    # 采多少条独立轨迹（不同随机初始噪声），取均值 ± std
+
+visualization:
+  log_scale_sigma: true  # x 轴 σ 用对数坐标
+  figsize: [10, 5]
+
+paths:
+  outdir: "exp/jacobian_analysis/output"

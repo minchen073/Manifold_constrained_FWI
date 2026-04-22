@@ -1,0 +1,36 @@
+# =============================================================================
+# sample_ddim_curvevel_b.py — 运行配置
+#
+# 直接运行：
+#   cd Manifold_constrained_FWI
+#   python scripts/sample_ddim_curvevel_b.py
+#
+# 命令行参数仍可覆盖此文件中的任何值，例如：
+#   python scripts/sample_ddim_curvevel_b.py --steps 50 --seed 7
+#
+# 注意：VIRTUAL_ENV 不匹配警告来自 uv，可改用以下命令运行：
+#   uv run --active python scripts/sample_ddim_curvevel_b.py
+# =============================================================================
+
+# 训练检查点目录（相对于 Manifold_constrained_FWI/training/ 或绝对路径）
+checkpoint: "runs/curvevel_b_ddpm_20260412_122045/checkpoint_epoch_0300"
+
+# DDIM 推理步数（200 已足够，1000 非常慢）
+steps: 5
+
+# 一次生成样本数
+batch_size: 8
+
+# 随机种子
+seed: 1
+
+# DDIM eta：0.0 = 确定性采样；>0 引入随机性scripts/sample_ddim_curvevel_b.py
+
+eta: 0.0
+
+# 输出目录：null 表示自动用时间戳生成在 exp/test_generation/<timestamp>/
+# out_dir: null
+
+# 速度归一化参数（null 表示从训练 config 自动读取）
+# velocity_center_m_s: null
+# velocity_scale_m_s: null

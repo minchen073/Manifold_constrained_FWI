@@ -10,12 +10,6 @@ resolution-markers = [
     "(python_full_version < '3.13' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 
-[manifest]
-members = [
-    "diffusion-posterior-sampling-main",
-    "minchen",
-]
-
 [[package]]
 name = "absl-py"
 version = "2.3.1"
@@ -485,11 +479,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/46/5c/f4c2eb8d481fe8784
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9c/dd/51c38785ce5e1c287b5ad17ba550edaaaffce0deb0da4857019c6700fbaf/diffusers-0.37.1-py3-none-any.whl", hash = "sha256:0537c0b28cb53cf39d6195489bcf8f833986df556c10f5e28ab7427b86fc8b90", size = 5001536, upload-time = "2026-03-25T08:04:02.385Z" },
 ]
-
-[[package]]
-name = "diffusion-posterior-sampling-main"
-version = "0.1.0"
-source = { virtual = "repos/diffusion-posterior-sampling-main" }
 
 [[package]]
 name = "distro"

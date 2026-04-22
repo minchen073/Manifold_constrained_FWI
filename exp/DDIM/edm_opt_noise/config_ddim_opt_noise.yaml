@@ -1,0 +1,41 @@
+# =============================================================================
+# demo_ddim_opt_noise.py
+#
+# 优化初始噪声 z，使 DDIM 采样速度与目标在归一化 [-1,1] 空间 MSE 最小。
+# 纯图像空间损失，不涉及波场正演。
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/DDIM/edm_opt_noise/demo_ddim_opt_noise.py \
+#     --config exp/DDIM/edm_opt_noise/config_ddim_opt_noise.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+ddim:
+  # 训练检查点目录（相对 Manifold_constrained_FWI/ 根目录）
+  checkpoint: "training/runs/curvevel_b_ddpm_20260412_122045/checkpoint_epoch_0300"
+  # DDIM 推理步数（步数少→优化更稳定但生成质量略低）
+  num_steps: 3
+  # DDIM eta：0.0 = 确定性采样
+  eta: 0.0
+  # 可选：手动指定 training yaml（null 表示自动从 checkpoint 同级目录发现）
+  # training_yaml: null
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 50
+
+optimization:
+  seed_z: 42
+  opt_steps: 300
+  lr: 0.02
+  snapshots: 30
+  reg_weight: 0  # χ² 先验正则化权重，设为 0 则关闭
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+
+paths:
+  outdir: "demo_output"

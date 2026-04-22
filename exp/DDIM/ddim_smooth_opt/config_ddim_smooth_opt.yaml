@@ -1,0 +1,42 @@
+# =============================================================================
+# config_ddim_smooth_opt.yaml — DDIM Latent Smoothing Optimization
+# CurveVel-B 版本
+#
+# 目标：优化初始噪声 z，使 DDIM(z) 经高斯光滑后接近真解的高斯光滑版本：
+#   min_z  MSE( gaussian_smooth(DDIM(z) * 1500 + 3000),
+#               gaussian_smooth(v_target) )
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/Curvevel_B/ddim_smooth_opt/demo_ddim_smooth_opt.py \
+#     --config exp/Curvevel_B/ddim_smooth_opt/config_ddim_smooth_opt.yaml
+# =============================================================================
+
+device: "cuda:0"
+seed: 42
+
+ddim:
+  checkpoint: "pretrained_model/Curvevel-B_DDIM"
+  num_steps: 3       # DDIM 去噪步数
+  eta: 0.0           # eta=0 → 确定性 DDIM
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 2
+
+smoothing:
+  sigma: 10.0        # 高斯光滑标准差（网格单元数），与 FWI 初始化一致
+
+optimization:
+  total_steps: 200
+  lr: 0.05
+  snapshots: 8       # 快照数
+  scheduler:
+    type: "cosine"   # "cosine" | "none"
+    eta_min: 0.0
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+
+paths:
+  outdir: "demo_output"

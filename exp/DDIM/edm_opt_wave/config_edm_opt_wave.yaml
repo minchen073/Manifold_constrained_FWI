@@ -37,7 +37,7 @@ sampler:
 
 curvevel:
   model60_path: "data/Curvevel-B/model60.npy"
-  sample_index: 10
+  sample_index: 20
 
 edm_sampler:
   num_steps: 20
@@ -45,13 +45,14 @@ edm_sampler:
   sigma_max: 80.0
   rho: 7.0
   alpha: 1.0
-  solver: "heun"
+  solver: "euler"
 
 optimization:
   seed_z: 42
-  opt_steps: 100
-  lr: 0.05
+  opt_steps: 300
+  lr: 0.1
   snapshots: 10
+  reg_weight: 0.001   # χ² 先验正则化权重，设为 0 则关闭
 
 visualization:
   vel_vmin_m_s: 1500.0

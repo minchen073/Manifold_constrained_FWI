@@ -1,0 +1,51 @@
+# =============================================================================
+# demo_ddim_sgld_wave.py
+#
+# SGLD update rule:
+#   z_{t+1} = z_t - lr * grad_U(z_t) + sqrt(2 * lr * T) * eps,  eps ~ N(0,I)
+#
+# Tuning T: run once with T=0 and note typical ||grad_z|| (call it g).
+# To make noise ~alpha fraction of the drift magnitude:
+#   T ≈ alpha² * lr * (g / sqrt(d))² / 2
+#
+# Run (from Manifold_constrained_FWI/):
+#   uv run python exp/DDIM/ddim_sgld_wave/demo_ddim_sgld_wave.py \
+#     --config exp/DDIM/ddim_sgld_wave/config_ddim_sgld_wave.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+ddim:
+  checkpoint: "training/runs/curvevel_b_ddpm_20260412_122045/checkpoint_epoch_0300"
+  num_steps: 6
+  eta: 0.0
+  # training_yaml: null
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 0
+
+optimization:
+  seed_z: 42
+  opt_steps: 300
+  lr: 1.0
+  snapshots: 10
+  reg_weight: 0
+
+  # SGLD temperature: noise_std = sqrt(2 * lr * T)
+  # T=0 -> pure gradient descent
+  temperature: 0
+
+  # Annealing endpoint; cosine decay from temperature to temperature_final.
+  # No annealing if temperature_final >= temperature.
+  temperature_final: 0.0002
+  anneal_schedule: "cosine"   # "cosine" or "linear"
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

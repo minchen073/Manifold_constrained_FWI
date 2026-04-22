@@ -1,0 +1,75 @@
+# =============================================================================
+# mid_time_opt：中间时刻参数化 FWI
+#
+# 优化变量：z ~ N(0,I)（标准高斯噪声，与速度场同形状）
+# 速度场生成：v_gen = D_θ(v_base + σ·z, σ)  （单步去噪器，无 ODE）
+# 损失：wave_MSE(F(v_gen), d_obs) + λ·R(z)
+#   R(z)：chi 分布负对数似然（鼓励 z 落在 ||z||≈√n 的球面上），λ=0 关闭
+# v_base：真解的高斯光滑化（归一化空间，固定不优化）
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/mid_time_opt/demo_mid_time_opt.py \
+#     --config exp/mid_time_opt/config_mid_time_opt.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+
+  train:
+    load_model: true
+    model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 8
+
+# v_base 初始化：真解的高斯光滑化（固定不优化）
+v_base:
+  smooth_sigma: 10.0    # 高斯滤波 σ（像素单位）
+
+# z 投影初始化：v_base + σ·ε →[逆向 ODE σ→0]→ v_proj + σ·ε₂ → z_init
+# 流程：在优化 σ 水平加噪后，沿 ODE 积分到 0 得到流形投影速度场，再重新加噪得到 z_init
+z_init:
+  num_steps: 20         # 第 0 阶段投影初始化的逆向 ODE 步数（区间 [σ, 0]）
+  gen_steps: 20         # 每阶段结束后 ODE 生成样本的步数（x_σ=v_base+σ·z → 0）
+  rho: 7.0              # 幂律时间节点指数
+  alpha: 1.0            # Heun 步长缩放
+
+# 中间时刻参数：σ 控制去噪器的"自由度"
+# 小 σ → 去噪器输出接近 v_base + σ·z（几乎恒等）
+# 大 σ → 去噪器可大幅改变速度场（但梯度信号可能变弱）
+denoise_step:
+  sigma: 1.0
+
+# 优化参数
+optimization:
+  opt_steps: 300
+  num_stages: 3         # 多阶段迭代次数
+  lr: 0.1
+  snapshots: 10         # evolution 图中的快照数
+  reg_weight: 0.0       # chi-NLL 正则化权重（0 = 关闭）
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

@@ -34,6 +34,16 @@ class OpenFWIUNetWrapper(nn.Module):
         self.inner_spatial = inner
         self.pad_mode = pad_mode
 
+    @property
+    def dtype(self) -> torch.dtype:
+        """Proxy inner UNet dtype; required by diffusers pipeline_utils.to()."""
+        return self.unet.dtype
+
+    @property
+    def device(self) -> torch.device:
+        """Proxy inner UNet device; required by DiffusionPipeline.device."""
+        return next(self.parameters()).device
+
     def forward(
         self,
         sample: torch.Tensor,

@@ -1,0 +1,92 @@
+# =============================================================================
+# edm_opt_wave_v2_ssi
+#
+# 阶段 1：与 edm_opt_wave_v2 相同的直接噪声优化（波场 MSE）。
+# SSI：  对阶段 1 速度场结果施加 K 次 SSI 生成多个初始噪声。
+# 阶段 2：从各 SSI 初始噪声出发，分别继续优化。
+#
+# 生成器参数（edm_sampler 块）全程共用，SSI forward ODE 单独设置步数/求解器。
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/edm_opt_wave_v2_ssi/demo_edm_opt_wave_v2_ssi.py \
+#     --config exp/edm_opt_wave_v2_ssi/config_edm_opt_wave_v2_ssi.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  rho: 7
+  alpha: 1.0
+
+  train:
+    load_model: true
+    model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 8
+
+# 生成器参数：全程共用（阶段 1/2 生成速度场、SSI 重建均使用同一套）
+edm_sampler:
+  num_steps: 5
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+  alpha: 1.0
+  solver: "euler"
+
+# 阶段 1 z 初始化
+# type: "smooth_invert" — 光滑速度场加噪 + 正向 ODE 反转（默认）
+# type: "gaussian"      — 标准高斯随机初始化 z ~ N(0, I)，忽略 smooth_sigma/sigma_mid/num_steps
+z_init:
+  type: "gaussian"
+  smooth_sigma: 10.0
+  sigma_mid: 1.0
+  num_steps: 100       # 正向 ODE 步数（仅初始化用）
+  rho: 7.0
+  alpha: 1.0
+  seed: 8421
+
+# 阶段 1 优化
+optimization:
+  stage1:
+    opt_steps: 20
+    lr: 0.1
+    snapshots: 8
+  stage2:
+    opt_steps: 20
+    lr: 0.1
+    snapshots: 8
+
+# SSI 参数
+# forward ODE 用于从「加噪速度场」反转到 σ_max；reverse ODE 复用 edm_sampler 参数。
+ssi:
+  num_samples: 3
+  add_noise_sigma: 0.5   # 加在阶段 1 速度场上的噪声水平（亦是 forward ODE 起始 σ）
+  forward_num_steps: 100
+  forward_solver: "heun"
+  seed_base: 9000        # SSI k=0,1,2 分别用 seed_base+0/1/2
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

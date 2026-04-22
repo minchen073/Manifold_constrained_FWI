@@ -27,8 +27,9 @@ pretrained_model/
 training/runs/
 
 # 实验输出（生成的图像、npy 结果等）
-exp/*/demo_output/
-exp/test_generation/
+**/demo_output/
+**/output/
+exp/demos/test_generation/
 
 # 日志
 *.log

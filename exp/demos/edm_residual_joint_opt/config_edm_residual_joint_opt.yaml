@@ -1,0 +1,93 @@
+# =============================================================================
+# demo_edm_residual_joint_opt.py 配置文件
+#
+# 实验设计：残差辅助速度场 v* + 潜变量 z 联合优化
+#
+#   速度场分解：v_combined = v0 + v*
+#     v0 = EDM(z * σ_max)   （由 z 生成）
+#     v* = 可训练残差变量
+#
+#   初始化：
+#     z0 ~ N(0, 1)
+#     v0_init = EDM(z0).detach()
+#     v*_init = gaussian_smooth(v_true, σ) - v0_init
+#       → v_combined 初始即为平滑真值，提供良好起点
+#
+#   损失函数：
+#     L = L_wave( clamp(v0+v*, -1, 1) )          [第一项：波场数据拟合]
+#       + λ_align · MSE( (v0+v*).detach(), v0 )  [第二项：驱动 z 学习 v_combined]
+#     注：第二项 detach(v0+v*)，否则 d/dz||v*||²=0，z 无梯度。
+#
+# 运行（Manifold_constrained_FWI 目录）:
+#   uv run python exp/edm_residual_joint_opt/demo_edm_residual_joint_opt.py \
+#     --config exp/edm_residual_joint_opt/config_edm_residual_joint_opt.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+model:
+  model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0.0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  alpha: 1.0
+
+target:
+  data_path: null   # null → 自动使用 data/Curvevel-B/
+  file_index: 60
+  sample_index: 5
+
+init:
+  smooth_sigma: 10.0   # 高斯光滑 σ（归一化空间），用于初始化 v*
+
+# z 初始化的独立随机种子
+joint_z:
+  seed: 4242
+
+# 波场损失全局配置
+fwi_common:
+  loss_type: "mse"   # l1 | mse | l2_sq | w2_per_trace
+  loss_scale: 1.0
+  log_every: 10
+
+experiments:
+  residual_joint:
+    type: "residual_joint"
+    iterations: 300
+    lr_vstar: 0.03    # v* 的学习率
+    lr_z: 0        # z 的学习率
+    align_lambda: 0  # λ_align：第二项（对齐损失）权重
+    cosine_annealing: true
+    eta_min: 0.0
+    snap_every: 30    # 每隔多少步保存演化快照（用于图和 GIF）
+    gif_enabled: true
+
+edm_sampler:
+  num_steps: 6
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+  alpha: 1.0
+  solver: "euler"
+
+w2_per_trace:
+  normalize_type: "softplus"
+  b: 0.1
+
+paths:
+  outdir: "demo_output"

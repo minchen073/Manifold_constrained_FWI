@@ -1,0 +1,50 @@
+# =============================================================================
+# config_ddim_opt_inv_wave.yaml — DDIM Wave-MSE Optimization + Inversion
+#
+# Three-phase pipeline:
+#   Phase 1: Optimize z in DDIM latent space (wave MSE)
+#            x̂₁ = ddim_sample(z, sample_steps)   [differentiable]
+#            L   = MSE(forward(x̂₁), wave_target)
+#   Phase 2: DDIM inversion of x̂₁
+#            x_{t_j} = √ᾱ_{t_j}·x̂₁ + √(1-ᾱ_{t_j})·ε
+#            z_inv   = ddim_inversion(x_{t_j})    [ascending ODE]
+#   Phase 3: Continue optimization from z_inv (same wave MSE loop)
+#
+# jump_step_idx selects t_j from the ascending inversion schedule:
+#   0           → smallest t (near x̂₁, very little noise injected)
+#   inv_steps-1 → largest  t (near x_T, heavy noise, good Gaussianity)
+#   Recommended: 10–30% into the schedule
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+ddim:
+  checkpoint: "training/runs/curvevel_b_ddpm_20260412_122045/checkpoint_epoch_0300"
+  sample_steps: 10    # DDIM steps for differentiable sampling (Phase 1 & 3)
+  inv_steps: 100      # DDIM steps for inversion (Phase 2)
+  eta: 0.0            # 0 = deterministic DDIM
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 20
+
+optimization:
+  seed_z: 42
+  phase1_steps: 50
+  phase3_steps: 50
+  lr: 0.1
+  snapshots: 8        # evolution snapshots per phase
+  reg_weight: 0       # χ² prior regularization weight (0 = disabled)
+
+inversion:
+  jump_step_idx: 5    # index into ascending inversion timestep list
+  eps_seed: 0         # seed for jump noise ε
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

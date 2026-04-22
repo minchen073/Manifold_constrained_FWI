@@ -1,0 +1,68 @@
+# =============================================================================
+# config_ddim_joint_opt_batch.yaml — Batch evaluation of ddim_joint_opt
+# CurveVel-B 版本
+#
+# 在多个样本上运行 Phase 1 + Phase 2 优化，统计三类结果的平均指标：
+#   1. v        — Phase 1 物理速度场（FWI 优化）
+#   2. v_gen    — Phase 1 z→DDIM 生成速度场
+#   3. v_p2     — Phase 2 z→DDIM 生成速度场
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/Curvevel_B/ddim_joint_opt_batch/demo_ddim_joint_opt_batch.py \
+#     --config exp/Curvevel_B/ddim_joint_opt_batch/config_ddim_joint_opt_batch.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42        # z 初始化基准种子，第 i 个样本使用 seed+i
+
+ddim:
+  checkpoint: "pretrained_model/Curvevel-B_DDIM"
+  eta: 0.0
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+
+initialization:
+  smooth_sigma: 10.0
+
+optimization:
+  total_steps: 300
+  lr_v: 0.03
+  lr_z: 0.03
+  optimizer_v: "adam"   # "adam" | "gd"
+  optimizer_z: "adam"   # "adam" | "gd"
+  z_steps_per_iter: 1
+  wave_loss: "mse"
+  num_steps: 3          # Phase 1 DDIM steps
+  scheduler_v:
+    type: "none"
+    eta_min: 0
+  scheduler_z:
+    type: "none"
+    eta_min: 0.03
+
+guidance:
+  warmup_steps: 0
+  ramp_steps: 50
+  lambda_max: 2
+
+phase2:
+  opt_steps: 200
+  lr: 0.02
+  optimizer: "adam"     # "adam" | "gd"
+  num_steps: 3          # Phase 2 DDIM steps
+  scheduler:
+    type: "none"
+    eta_min: 0.02
+
+batch:
+  sample_start: 0
+  sample_end: 100       # 评估 [sample_start, sample_end) 范围内的样本
+  example_indices: [0, 20, 40, 60, 80]   # 保存完整可视化的样本索引
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+
+paths:
+  outdir: "demo_output"
