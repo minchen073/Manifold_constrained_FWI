@@ -1,0 +1,71 @@
+# =============================================================================
+# RED-diff FWI 复现实验
+#
+# 复现 FWI/demos/fwi_then_manifold_init_opt 中的 red_diffeq 方法。
+# 梯度更新：v.grad += λ · (v - D(v + α(t)·ε, max(α(t), σ_min))) · α(t)^(-1) / numel
+# α(t) = √((1-γ(t))/γ(t))，γ 来自 VP sigmoid β 调度。
+#
+# 运行（Manifold_constrained_FWI 目录）:
+#   uv run python exp/red_diff/demo_red_diff.py \
+#     --config exp/red_diff/config_red_diff.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+model:
+  model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0.0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  alpha: 1.0
+
+target:
+  data_path: null   # null → 自动使用 data/Curvevel-B/
+  file_index: 60
+  sample_index: 27
+
+init:
+  smooth_sigma: 10.0
+
+red_diff:
+  loss_type: "mse"
+  loss_scale: 1.0
+  iterations: 300
+  lr: 0.03
+  reg_lambda: 0.75
+  cosine_annealing: true
+  eta_min: 0.0
+  log_every: 10
+  snap_every: 30
+  gif_enabled: true
+  noise_seed: 11003  # 与 FWI/demos 版本一致
+
+  # VP sigmoid 调度（与 red-diffeq-main/configs/default.yaml 一致）
+  red_vp_timesteps: 1000
+  red_fixed_timestep: null   # null = 使用全部 1000 步
+  red_sigmoid_schedule_kwargs:
+    start: -3
+    end: 3
+    tau: 1
+
+w2_per_trace:
+  normalize_type: "softplus"
+  b: 0.1
+
+paths:
+  outdir: "demo_output"

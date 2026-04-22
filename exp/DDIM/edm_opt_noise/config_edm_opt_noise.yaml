@@ -1,0 +1,62 @@
+# =============================================================================
+# demo_edm_opt_noise.py
+#
+# 优化初始噪声 z，使 EDM PF-ODE 采样速度与目标在归一化 [-1,1] 空间 MSE 最小。
+# 纯图像空间损失，不涉及波场正演。
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/edm_opt_noise/demo_edm_opt_noise.py \
+#     --config exp/edm_opt_noise/config_edm_opt_noise.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  rho: 7
+  alpha: 1.0
+
+  train:
+    load_model: true
+    model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 12
+
+edm_sampler:
+  num_steps: 5
+  sigma_min: 0.002
+  sigma_max: 80.0
+  rho: 7.0
+  alpha: 1.0
+  solver: "euler"
+
+optimization:
+  seed_z: 42
+  opt_steps: 300
+  lr: 0.02
+  snapshots: 30
+  reg_weight: 0.1   # χ² 先验正则化权重，设为 0 则关闭
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+
+paths:
+  outdir: "demo_output"

@@ -1,0 +1,56 @@
+# =============================================================================
+# config_ddim_red_diffeq.yaml — RED-DiffEq with our DDPM/DDIM model
+#
+# Reproduces RED-DiffEq (https://arxiv.org/abs/...) using:
+#   - Our pretrained DDPM/DDIM model as the diffusion prior
+#   - seismic_master_forward_modeling as the forward operator
+#
+# Algorithm (one optimization step):
+#   1. wave_pred  = forward(μ)
+#   2. L_obs      = L1(wave_pred, wave_target)
+#   3. x_t        = √ᾱ_t · μ + √(1-ᾱ_t) · ε,    t ~ Uniform(0, max_t)
+#   4. ε_pred     = model(x_t, t)
+#   5. L_reg      = mean((ε_pred − ε).detach() ⊙ μ)
+#   6. L          = L_obs + λ · L_reg
+#   7. μ ← μ − lr · ∇_μ L,   then clamp(μ, −1, 1)
+#
+# Initialization options (matches official RED-DiffEq prepare_initial_model):
+#   "smoothed"     : normalize → gaussian_filter(sigma) — official openfwi default
+#   "homogeneous"  : fill with min value of top row of normalized field (near-surface v)
+#   "linear"       : linspace from global min to max along depth axis
+#   "zero"         : constant 0 in normalized space (= 3000 m/s uniform)
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+ddim:
+  checkpoint: "training/runs/curvevel_b_ddpm_20260412_122045/checkpoint_epoch_0300"
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 25
+  
+initialization:
+  type: "smoothed"     # "smoothed" | "homogeneous" | "linear" | "zero"
+  smooth_sigma: 10.0   # Gaussian blur sigma (for "smoothed"); official openfwi value = 10.0
+
+optimization:
+  opt_steps: 300
+  lr: 0.03
+  reg_lambda: 0.75     # λ: weight for RED regularization
+  snapshots: 10         # number of evolution snapshots
+  wave_loss: "l1"       # "l1" | "mse"  — official uses L1
+
+red:
+  max_timestep: 1000   # upper bound for uniform timestep sampling
+  sigma_x0: 0.0001     # pre-noise std added to μ before diffusion (0 = disabled)
+  use_time_weight: false  # weight reg by √((1-ᾱ_t)/ᾱ_t)
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

@@ -1,0 +1,80 @@
+# =============================================================================
+# config_ddim_joint_opt.yaml — Joint Alternating Optimization: Physical FWI + Latent Prior
+# CurveVel-B 版本
+#
+# Two-variable alternating optimization:
+#
+#   v   (auxiliary, physical space):
+#       - Init: Gaussian-smoothed velocity model
+#       - Loss: L_wave(v) + λ(i) · L_guide(v; v_gen)
+#       - L_guide is a direct L2 pull toward v_gen:
+#           L_guide = ||v − v_gen.detach()||²
+#       - λ has warmup: 0 for first warmup_steps, then linear ramp to λ_max
+#
+#   z   (latent code):
+#       - Init: z ~ N(0, I)
+#       - Loss: MSE(DDIM(z), v.detach())   [like demo_ddim_opt_noise, target = v]
+#       - Keeps z on a trajectory that generates v-like velocity fields
+#
+# Per outer iteration:
+#   1. Update z for z_steps_per_iter steps  (target = current v)
+#   2. Decode v_gen = DDIM(z) with no_grad  (for v's guidance)
+#   3. Update v for 1 step                  (wave loss + λ·guidance from v_gen)
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/Curvevel_B/ddim_joint_opt_ls/demo_ddim_joint_opt.py \
+#     --config exp/Curvevel_B/ddim_joint_opt_ls/config_ddim_joint_opt.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+ddim:
+  checkpoint: "pretrained_model/Curvevel-B_DDIM"
+  eta: 0.0              # DDIM eta=0 → deterministic
+
+curvevel:
+  model60_path: "data/Curvevel-B/model60.npy"
+  sample_index: 31
+
+initialization:
+  smooth_sigma: 10.0    # Gaussian blur sigma for v's initial model
+
+optimization:
+  total_steps: 300      # number of outer iterations
+  lr_v: 0.03            # learning rate for v
+  lr_z: 0.03            # learning rate for z
+  optimizer_v: "adam"   # "adam" | "gd"
+  optimizer_z: "adam"   # "adam" | "gd"
+  z_steps_per_iter: 1   # z update steps per outer iteration
+  snapshots: 10          # number of visualization snapshots
+  wave_loss: "mse"       # "l1" | "mse"
+  num_steps: 3          # Phase 1 DDIM steps (sampling + final gen)
+  scheduler_v:
+    type: "none"      # "cosine" | "none"
+    eta_min: 0        # minimum lr for v at end of cosine annealing (T_max = total_steps)
+  scheduler_z:
+    type: "none"      # "cosine" | "none"
+    eta_min: 0        # minimum lr for z at end of cosine annealing (T_max = total_steps)
+
+guidance:
+  warmup_steps: 50      # λ=0 for first warmup_steps outer iterations
+  ramp_steps: 50       # linear ramp from 0 to λ_max over this many steps after warmup
+  lambda_max: 1      # maximum guidance weight for ||v - v_gen||² term
+
+phase2:
+  opt_steps: 100         # wave-domain latent line-search steps
+  alpha0: 1.0           # initial step size for line search
+  rho: 0.9              # backtrack factor (α ← α * rho until Armijo satisfied)
+  c1: 1e-3            # Armijo sufficient-decrease constant
+  max_backtracks: 10    # maximum number of backtrack trials per step
+  num_steps: 3          # Phase 2 DDIM steps
+  snapshots: 5          # number of evolution snapshots
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

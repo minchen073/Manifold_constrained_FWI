@@ -1,0 +1,94 @@
+# =============================================================================
+# aux_vel_edm_joint_opt_v2 配置
+#
+# 相比 v1 的改动：
+#   1. z_init：光滑速度场 + sigma_mid 噪声跳跃 → 正向 ODE → 初始噪声
+#      （解决 v1 中随机初始化导致先验速度场与物理速度场 gap 太大的问题）
+#   2. 交替优化：v_phys 和 z 使用独立优化器，不再联合反传
+#   3. v_phys 引导：波场误差 + RED-diff 风格 L2 引导（朝向 v_gen），强度参考 red_diffeq 实验
+#   4. z 目标：每步最小化 MSE(v_gen(z), v_phys.detach())
+#
+# 运行（Manifold_constrained_FWI 目录）:
+#   uv run python exp/aux_vel_edm_joint_opt_v2/demo_aux_vel_edm_joint_opt_v2.py \
+#     --config exp/aux_vel_edm_joint_opt_v2/config_aux_vel_edm_joint_opt_v2.yaml
+# =============================================================================
+
+device: "cuda:3"
+seed: 42
+
+model:
+  model_path: "pretrained_model/Curvevel-B_EDM/trained_model.pth"
+
+sampler:
+  model_type: "DhariwalUNet"
+  img_resolution: 70
+  padding_resolution: 72
+  img_channels: 1
+  label_dim: 0
+  model_channels: 32
+  channel_mult: [1, 2, 3, 4]
+  channel_mult_emb: 4
+  num_blocks: 3
+  attn_resolutions: [32, 16, 8]
+  dropout: 0.0
+  label_dropout: 0
+  sigma_min: 0.002
+  sigma_max: 80.0
+  sigma_data: 0.6
+  rho: 7.0
+  alpha: 1.0
+
+target:
+  data_path: null   # null → 自动使用 data/Curvevel-B/
+  file_index: 60
+  sample_index: 8
+
+init:
+  smooth_sigma: 10.0  # 与 FWI 初始化保持一致
+
+fwi_common:
+  loss_type: "mse"
+  loss_scale: 1.0
+
+# === z 初始化 ===
+# 对光滑速度场添加 sigma_mid 级别噪声，再正向 ODE 至 sigma_max，得到 z_init。
+# sigma_mid 越大，初始化越接近随机噪声（高斯性更好）但与光滑速度场距离越远；
+# sigma_mid 越小，与光滑速度场更接近但反转质量可能下降。
+# 推荐范围：1.0 ~ 10.0
+z_init:
+  sigma_mid: 1.0
+  num_steps: 20
+  rho: 7.0
+  alpha: 1.0
+  seed: 8421
+
+# === 交替优化参数 ===
+opt:
+  iterations: 300
+  lr_v: 0.03        # v_phys 学习率，与 RED-diffeq 实验一致
+  lr_z: 0.01        # z 学习率
+  cosine_annealing: true
+  eta_min: 0.0
+  loss_scale: 1.0
+  log_every: 10
+  snap_every: 30
+  gif_enabled: true
+
+  # RED-diff 风格引导强度（参考 red_diffeq 实验中 reg_lambda=0.75）
+  # 若出现 v_phys 与 v_gen 相互拉扯，可适当减小此值
+  reg_lambda: 0.3
+
+  # v_phys 更新时用的生成 ODE（无梯度，质量优先）
+  edm_v_num_steps: 10
+  edm_v_solver: "euler"
+
+  # z 更新时用的生成 ODE（有梯度，步数少以控制显存）
+  edm_z_num_steps: 6
+  edm_z_solver: "euler"
+
+w2_per_trace:
+  normalize_type: "softplus"
+  b: 0.1
+
+paths:
+  outdir: "demo_output"

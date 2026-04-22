@@ -1,0 +1,82 @@
+# =============================================================================
+# config_ddim_joint_opt.yaml — Joint Alternating Optimization: Physical FWI + Latent Prior
+# FlatFault-B 版本
+#
+# Two-variable alternating optimization:
+#
+#   v   (auxiliary, physical space):
+#       - Init: Gaussian-smoothed velocity model
+#       - Loss: L_wave(v) + λ(i) · L_guide(v; v_gen)
+#       - L_guide is a direct L2 pull toward v_gen:
+#           L_guide = ||v − v_gen.detach()||²
+#       - λ has warmup: 0 for first warmup_steps, then linear ramp to λ_max
+#
+#   z   (latent code):
+#       - Init: z ~ N(0, I)
+#       - Loss: MSE(DDIM(z), v.detach())   [like demo_ddim_opt_noise, target = v]
+#       - Keeps z on a trajectory that generates v-like velocity fields
+#
+# Per outer iteration:
+#   1. Update z for z_steps_per_iter steps  (target = current v)
+#   2. Decode v_gen = DDIM(z) with no_grad  (for v's guidance)
+#   3. Update v for 1 step                  (wave loss + λ·guidance from v_gen)
+#
+# Run（Manifold_constrained_FWI 目录）:
+#   uv run python exp/FlatFault_B/ddim_joint_opt/demo_ddim_joint_opt.py \
+#     --config exp/FlatFault_B/ddim_joint_opt/config_ddim_joint_opt.yaml
+# =============================================================================
+
+device: "cuda:0"
+seed: 42
+
+ddim:
+  # 预训练模型路径（相对 Manifold_constrained_FWI/ 根目录）
+  # 可以是：
+  #   - 包含 model.pt + scheduler/ 的 checkpoint 目录
+  #   - 直接指向独立 model.pt 文件（此时 scheduler 由 scheduler_config 构建）
+  model_path: "pretrained_model/FlatFault-B_DDIM/model.pt"
+  num_steps: 6          # DDIM steps (shared: grad computation, v_gen decode, Phase 1 final gen)
+  eta: 0.0              # DDIM eta=0 → deterministic
+  num_steps_final: 6    # DDIM steps for final high-quality generation after optimization
+  # 当 model_path 为独立 .pt 文件时，用下方参数构建 DDPMScheduler
+  scheduler_config:
+    num_train_timesteps: 1000
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: "linear"
+    prediction_type: "epsilon"
+    timestep_spacing: "leading"
+
+flatfault:
+  data_path: "data/FlatFault-B/vel6_1_0.npy"
+  sample_index: 0
+
+initialization:
+  smooth_sigma: 10.0    # Gaussian blur sigma for v's initial model
+
+optimization:
+  total_steps: 300      # number of outer iterations
+  lr_v: 0.03            # learning rate for v
+  lr_z: 0.03            # learning rate for z
+  z_steps_per_iter: 1   # z update steps per outer iteration
+  snapshots: 8          # number of visualization snapshots
+  wave_loss: "l1"       # "l1" | "mse"
+
+guidance:
+  warmup_steps: 50      # λ=0 for first warmup_steps outer iterations
+  ramp_steps: 100       # linear ramp from 0 to λ_max over this many steps after warmup
+  lambda_max: 0.75      # maximum guidance weight for ||v - v_gen||² term
+
+phase2:
+  opt_steps: 100        # wave-domain latent optimization steps
+  lr: 0.0005            # learning rate for z in Phase 2
+  num_steps: 3          # DDIM steps for wave loss computation
+  snapshots: 5          # number of evolution snapshots
+
+visualization:
+  vel_vmin_m_s: 1500.0
+  vel_vmax_m_s: 4500.0
+  wave_plot_shot: 0
+
+paths:
+  outdir: "demo_output"

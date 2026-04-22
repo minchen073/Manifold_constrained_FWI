@@ -194,6 +194,7 @@ def main() -> None:
     opt_steps = int(opt_cfg.get("opt_steps", 300))
     lr = float(opt_cfg.get("lr", 0.02))
     snapshots = int(opt_cfg.get("snapshots", 10))
+    reg_weight = float(opt_cfg.get("reg_weight", 0.0))
 
     viz = cfg.get("visualization") or {}
     vel_vmin = float(viz.get("vel_vmin_m_s", 1500.0))
@@ -231,37 +232,82 @@ def main() -> None:
     snap_times = np.unique(np.round(np.linspace(0, opt_steps, snapshots, endpoint=True)).astype(int))
     snap_times = np.clip(snap_times, 0, opt_steps)
 
-    hist_vel: list[np.ndarray] = []
-    hist_z: list[np.ndarray] = []
-    hist_labels: list[str] = []
+    hist_vel:       list[np.ndarray] = []
+    hist_z:         list[np.ndarray] = []
+    hist_grad:      list[np.ndarray] = []
+    hist_grad_vel:  list[np.ndarray] = []
+    hist_labels:    list[str] = []
 
-    def capture(label: str) -> None:
+    def capture(label: str, pred_n_grad_np: np.ndarray | None = None) -> None:
         with torch.no_grad():
             pred_n = sample_no_grad(sampler, z.detach(), sigma_max, num_steps, sigma_min, rho, alpha, solver)
             pred_vel = v_denormalize_np(pred_n)
         hist_vel.append(pred_vel)
         hist_z.append(z.detach().cpu().numpy().squeeze().copy())
         hist_labels.append(label)
+        grad_np = (
+            z.grad.detach().cpu().numpy().squeeze().copy()
+            if z.grad is not None
+            else np.zeros(z.shape[-2:], dtype=np.float32)
+        )
+        hist_grad.append(grad_np)
+        hist_grad_vel.append(
+            pred_n_grad_np if pred_n_grad_np is not None
+            else np.zeros(z.shape[-2:], dtype=np.float32)
+        )
 
     losses: list[float] = []
+    mse_losses: list[float] = []
+    reg_losses: list[float] = []        # reg_weight * reg (scaled)
     mae_hist: list[float] = []
     ssim_hist: list[float] = []
-    grad_z_hist: list[float] = []
+    grad_total_hist: list[float] = []
+    grad_mse_hist: list[float] = []
+    grad_reg_hist: list[float] = []
 
     if 0 in snap_times:
         capture("iter 0 (init)")
 
+    d = z.numel()  # = 1×1×70×70 = 4900
+
     for it in range(opt_steps):
         opt.zero_grad(set_to_none=True)
         pred_n = sample_latent_grad(sampler, z, sigma_max, num_steps, sigma_min, rho, alpha, solver)
+        pred_n.retain_grad()
         pred_b = pred_n.view(1, 1, 70, 70)
-        loss = F.mse_loss(pred_b, target_norm)
-        loss.backward()
-        grad_z_hist.append(z.grad.norm().item() if z.grad is not None else 0.0)
+        mse = F.mse_loss(pred_b, target_norm)
+        if reg_weight > 0.0:
+            z_norm = torch.norm(z.view(-1), p=2)
+            # χ(d) NLL: -(d-1)·log(r) + r²/2  (minimum at r* = √(d-1) ≈ 70)
+            reg = -(d - 1) * torch.log(z_norm + 1e-8) + z_norm ** 2 / 2
+            loss = mse + reg_weight * reg
+            loss.backward()
+            # 解析计算 reg 对 z 的梯度：∂(reg_weight·reg)/∂z = reg_weight·z·(1 - (d-1)/r²)
+            with torch.no_grad():
+                r2 = z_norm.item() ** 2 + 1e-16
+                grad_reg_vec = reg_weight * z * (1.0 - (d - 1) / r2)
+                grad_mse_vec = z.grad - grad_reg_vec
+            grad_total = z.grad.norm().item()
+            grad_mse_n = grad_mse_vec.norm().item()
+            grad_reg_n = grad_reg_vec.norm().item()
+            reg_val = (reg_weight * reg).item()
+        else:
+            loss = mse
+            loss.backward()
+            grad_total = z.grad.norm().item() if z.grad is not None else 0.0
+            grad_mse_n = grad_total
+            grad_reg_n = 0.0
+            reg_val = 0.0
         opt.step()
         scheduler.step()
 
         losses.append(loss.item())
+        mse_losses.append(mse.item())
+        reg_losses.append(reg_val)
+        grad_total_hist.append(grad_total)
+        grad_mse_hist.append(grad_mse_n)
+        grad_reg_hist.append(grad_reg_n)
+
         with torch.no_grad():
             pv = v_denormalize_np(pred_n)
             mae, ssim_v = velocity_mae_ssim(pv, target_vel_np, device, vel_vmin, vel_vmax)
@@ -269,19 +315,27 @@ def main() -> None:
         ssim_hist.append(ssim_v)
 
         if (it + 1) in snap_times:
-            capture(f"iter {it + 1}")
+            gv = pred_n.grad.detach().cpu().numpy().squeeze().copy() if pred_n.grad is not None else None
+            capture(f"iter {it + 1}", pred_n_grad_np=gv)
 
         if (it + 1) % max(1, opt_steps // 8) == 0 or it == 0:
-            print(
-                f"iter {it + 1}/{opt_steps}  MSE[-1,1]={loss.item():.6f}  "
-                f"MAE={mae:.1f} m/s  SSIM={ssim_v:.4f}  ||∇z||={grad_z_hist[-1]:.4e}"
-            )
+            if reg_weight > 0.0:
+                print(
+                    f"iter {it+1}/{opt_steps}  "
+                    f"total={loss.item():.6f}  MSE={mse.item():.6f}  reg={reg_val:.6f}  "
+                    f"MAE={mae:.1f} m/s  SSIM={ssim_v:.4f}  "
+                    f"||∇z||={grad_total:.4e}  ||∇z||_mse={grad_mse_n:.4e}  ||∇z||_reg={grad_reg_n:.4e}"
+                )
+            else:
+                print(
+                    f"iter {it+1}/{opt_steps}  MSE={mse.item():.6f}  "
+                    f"MAE={mae:.1f} m/s  SSIM={ssim_v:.4f}  ||∇z||={grad_total:.4e}"
+                )
 
-    # --- 图1：优化演化快照（速度场 + z）---
+    # --- 图1：优化演化快照（速度场 + z + ∇z + ∇pred_n）---
     ncols = 1 + len(hist_vel)
-    fig, axes = plt.subplots(2, ncols, figsize=(2.6 * ncols, 5.5))
-    if ncols == 1:
-        axes = np.array([[axes[0]], [axes[1]]])
+    fig, axes = plt.subplots(4, ncols, figsize=(2.6 * ncols, 10.0))
+    axes = np.atleast_2d(axes).reshape(4, ncols)
     z_hist_max = max((float(np.abs(hz).max()) for hz in hist_z), default=0.0)
     z0lim = max(3.0, float(np.abs(z_init_np).max()) + 0.1, z_hist_max + 0.1)
     axes[0, 0].imshow(target_vel_np, cmap="viridis", aspect="auto", vmin=vel_vmin, vmax=vel_vmax)
@@ -290,14 +344,27 @@ def main() -> None:
     axes[1, 0].imshow(z_init_np, cmap="coolwarm", aspect="auto", vmin=-z0lim, vmax=z0lim)
     axes[1, 0].set_title("init z", fontsize=8)
     axes[1, 0].axis("off")
-    for j, (vel, zj, lbl) in enumerate(zip(hist_vel, hist_z, hist_labels)):
-        axes[0, j + 1].imshow(vel, cmap="viridis", aspect="auto", vmin=vel_vmin, vmax=vel_vmax)
-        axes[0, j + 1].set_title(lbl, fontsize=8)
-        axes[0, j + 1].axis("off")
-        axes[1, j + 1].imshow(zj, cmap="coolwarm", aspect="auto", vmin=-z0lim, vmax=z0lim)
-        axes[1, j + 1].axis("off")
+    axes[2, 0].axis("off")   # 第 0 列梯度格留空（init 时无梯度）
+    axes[3, 0].axis("off")   # 第 0 列 pred_n 梯度格留空（init 时无梯度）
+
+    for j, (vel, zj, gj, gvj, lbl) in enumerate(zip(hist_vel, hist_z, hist_grad, hist_grad_vel, hist_labels)):
+        col = j + 1
+        axes[0, col].imshow(vel, cmap="viridis", aspect="auto", vmin=vel_vmin, vmax=vel_vmax)
+        axes[0, col].set_title(lbl, fontsize=8)
+        axes[0, col].axis("off")
+        axes[1, col].imshow(zj, cmap="coolwarm", aspect="auto", vmin=-z0lim, vmax=z0lim)
+        axes[1, col].axis("off")
+        glim = max(float(np.percentile(np.abs(gj), 99)), 1e-8)
+        axes[2, col].imshow(gj, cmap="coolwarm", aspect="auto", vmin=-glim, vmax=glim)
+        axes[2, col].axis("off")
+        gvlim = max(float(np.percentile(np.abs(gvj), 99)), 1e-8)
+        axes[3, col].imshow(gvj, cmap="coolwarm", aspect="auto", vmin=-gvlim, vmax=gvlim)
+        axes[3, col].axis("off")
+
     axes[0, 0].set_ylabel("velocity (m/s)", fontsize=9)
     axes[1, 0].set_ylabel("noise z", fontsize=9)
+    axes[2, 0].set_ylabel("∇z (grad)", fontsize=9)
+    axes[3, 0].set_ylabel("∇x̂₀ (pred grad)", fontsize=9)
     plt.suptitle(
         f"EDM PF-ODE | steps={num_steps} σ∈[{sigma_min},{sigma_max}] ρ={rho} solver={solver} | "
         f"model60[{sample_index}] seed_z={seed_z}",
@@ -337,43 +404,87 @@ def main() -> None:
         ax.set_title(title, fontsize=9)
         ax.axis("off")
         plt.colorbar(im, ax=ax, fraction=0.046)
+    reg_str = f"  reg={reg_losses[-1]:.6f}" if reg_weight > 0.0 else ""
     plt.suptitle(
-        f"Final | MAE={mae_hist[-1]:.1f} m/s  SSIM={ssim_hist[-1]:.4f}  MSE[-1,1]={losses[-1]:.6f}"
+        f"Final | MAE={mae_hist[-1]:.1f} m/s  SSIM={ssim_hist[-1]:.4f}  "
+        f"MSE={mse_losses[-1]:.6f}{reg_str}  total={losses[-1]:.6f}"
     )
     plt.tight_layout()
     plt.savefig(out_dir / "result.png", dpi=200, bbox_inches="tight")
     plt.close()
 
-    # --- 图3：指标曲线（Loss / MAE / SSIM / ||∇z||）---
+    # --- 图3：指标曲线 ---
     iters = list(range(1, len(losses) + 1))
-    fig, axes = plt.subplots(2, 2, figsize=(9, 5.5))
-    axes[0, 0].plot(iters, losses, color="C0")
-    axes[0, 0].set_ylabel("MSE [-1,1]")
-    axes[0, 0].set_title("Image-space loss")
-    axes[0, 0].grid(True, alpha=0.3)
-    axes[0, 1].plot(iters, mae_hist, color="C1")
-    axes[0, 1].set_ylabel("MAE (m/s)")
-    axes[0, 1].set_title("Velocity MAE")
-    axes[0, 1].grid(True, alpha=0.3)
-    axes[1, 0].plot(iters, ssim_hist, color="C2")
-    axes[1, 0].set_ylabel("SSIM")
-    axes[1, 0].set_xlabel("Iteration")
-    axes[1, 0].set_title("Velocity SSIM")
-    axes[1, 0].grid(True, alpha=0.3)
-    axes[1, 1].semilogy(iters, grad_z_hist, color="C3")
-    axes[1, 1].set_ylabel("||∇z|| (log scale)")
-    axes[1, 1].set_xlabel("Iteration")
-    axes[1, 1].set_title("Gradient norm of z")
-    axes[1, 1].grid(True, alpha=0.3)
+    use_reg = reg_weight > 0.0
+    if use_reg:
+        fig, axes = plt.subplots(3, 2, figsize=(10, 10))
+        # 第一行：loss 分解
+        axes[0, 0].plot(iters, mse_losses, color="C0")
+        axes[0, 0].set_ylabel("MSE [-1,1]")
+        axes[0, 0].set_title("Data loss (MSE)")
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 1].plot(iters, reg_losses, color="C5")
+        axes[0, 1].set_ylabel(f"reg_weight × reg  (λ={reg_weight})")
+        axes[0, 1].set_title("Regularization loss (χ-NLL scaled)")
+        axes[0, 1].grid(True, alpha=0.3)
+        # 第二行：总 loss + 物理指标
+        axes[1, 0].plot(iters, losses, color="C0", label="total")
+        axes[1, 0].plot(iters, mse_losses, color="C0", linestyle="--", alpha=0.5, label="MSE")
+        axes[1, 0].plot(iters, reg_losses, color="C5", linestyle="--", alpha=0.5, label="reg")
+        axes[1, 0].set_ylabel("Loss")
+        axes[1, 0].set_title("Total loss (MSE + reg)")
+        axes[1, 0].legend(fontsize=8)
+        axes[1, 0].grid(True, alpha=0.3)
+        axes[1, 1].plot(iters, mae_hist, color="C1")
+        axes[1, 1].set_ylabel("MAE (m/s)")
+        axes[1, 1].set_title("Velocity MAE")
+        axes[1, 1].grid(True, alpha=0.3)
+        # 第三行：梯度范数分解
+        axes[2, 0].semilogy(iters, ssim_hist, color="C2")
+        axes[2, 0].set_ylabel("SSIM")
+        axes[2, 0].set_xlabel("Iteration")
+        axes[2, 0].set_title("Velocity SSIM")
+        axes[2, 0].grid(True, alpha=0.3)
+        axes[2, 1].semilogy(iters, grad_total_hist, color="C3", label="||∇z|| total")
+        axes[2, 1].semilogy(iters, grad_mse_hist, color="C0", linestyle="--", alpha=0.8, label="||∇z||_mse")
+        axes[2, 1].semilogy(iters, grad_reg_hist, color="C5", linestyle="--", alpha=0.8, label="||∇z||_reg")
+        axes[2, 1].set_ylabel("||∇z|| (log)")
+        axes[2, 1].set_xlabel("Iteration")
+        axes[2, 1].set_title("Gradient norm decomposition")
+        axes[2, 1].legend(fontsize=8)
+        axes[2, 1].grid(True, alpha=0.3)
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(9, 5.5))
+        axes[0, 0].plot(iters, mse_losses, color="C0")
+        axes[0, 0].set_ylabel("MSE [-1,1]")
+        axes[0, 0].set_title("Image-space loss")
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 1].plot(iters, mae_hist, color="C1")
+        axes[0, 1].set_ylabel("MAE (m/s)")
+        axes[0, 1].set_title("Velocity MAE")
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[1, 0].plot(iters, ssim_hist, color="C2")
+        axes[1, 0].set_ylabel("SSIM")
+        axes[1, 0].set_xlabel("Iteration")
+        axes[1, 0].set_title("Velocity SSIM")
+        axes[1, 0].grid(True, alpha=0.3)
+        axes[1, 1].semilogy(iters, grad_total_hist, color="C3")
+        axes[1, 1].set_ylabel("||∇z|| (log scale)")
+        axes[1, 1].set_xlabel("Iteration")
+        axes[1, 1].set_title("Gradient norm of z")
+        axes[1, 1].grid(True, alpha=0.3)
     plt.suptitle("Optimization metrics", fontsize=10)
     plt.tight_layout()
     plt.savefig(out_dir / "metrics.png", dpi=150, bbox_inches="tight")
     plt.close()
 
     summary = {
-        "final_mse_norm": float(losses[-1]),
+        "final_total_loss": float(losses[-1]),
+        "final_mse_norm": float(mse_losses[-1]),
+        "final_reg_loss": float(reg_losses[-1]),
         "final_mae_m_s": float(mae_hist[-1]),
         "final_ssim": float(ssim_hist[-1]),
+        "reg_weight": reg_weight,
         "out_dir": str(out_dir),
     }
     with open(out_dir / "summary.json", "w", encoding="utf-8") as f:

@@ -1,24 +1,27 @@
 # =============================================================================
-# Curvevel-B DDPM 训练：本文件为自包含完整配置（不依赖 CurveVelB 目录下的 JSON）。
+# FlatFault-B DDPM 训练：与 CurveVel-B 版本共享相同网络结构和超参数。
+# 文件名模式：vel{prefix}_1_{i}.npy，prefix∈{6,7,8}，i=0-31 训练，i=32-35 测试。
 # 路径均相对于 Manifold_constrained_FWI/training/ 解析。
 # =============================================================================
 
 data:
-  # 数据根目录（相对 training/）：即 Manifold_constrained_FWI/data/Curvevel-B
-  root: "../data/Curvevel-B"
-  train_model_id_range: [1, 48]
-  test_model_id_range: [49, 60]
+  root: "../data/FlatFault-B"
+  # 文件名前缀列表，对应 vel{prefix}_1_{i}.npy 中的 prefix
+  file_prefixes: [6, 7, 8]
+  # 每个 prefix 内的 index 范围（含两端）
+  train_index_range: [0, 31]
+  test_index_range: [32, 35]
   samples_per_file: 500
+  # 速度归一化：y = (x - center) / scale，映射 [1500, 4500] m/s → [-1, 1]
   velocity_center_m_s: 3000.0
   velocity_scale_m_s: 1500.0
   num_workers: 4
   pin_memory: true
 
-# UNet：与 diffusers UNet2DModel 的 config.json 字段一致（与 CVB-2000 结构对齐）
+# UNet：与 CurveVel-B 版本完全相同的结构，从头训练
 unet:
-  load_pretrained_weights: True
-  # If true: pretrained_weights_path must be model.pt / .pth or a directory containing model.pt (torch.save of OpenFWIUNetWrapper).
-  pretrained_weights_path: runs/curvevel_b_ddpm_20260411_211222/checkpoint_epoch_0400/model.pt
+  load_pretrained_weights: false
+  pretrained_weights_path: null
   torch_dtype: float32
   config:
     _class_name: UNet2DModel
@@ -60,7 +63,7 @@ unet:
       - UpBlock2D
     upsample_type: conv
 
-# DDPM 噪声调度器：与 diffusers DDPMScheduler 的 scheduler_config.json 一致
+# DDPM 噪声调度器：与 CurveVel-B 版本相同
 noise_scheduler:
   config:
     _class_name: DDPMScheduler
@@ -83,17 +86,16 @@ noise_scheduler:
 
 training:
   output_root: "./runs"
-  run_name: "curvevel_b_ddpm"
+  run_name: "flatfault_b_ddpm"
   seed: 42
 
-  # 物理 GPU 索引（默认用 3 号卡）。若已设置环境变量 CUDA_VISIBLE_DEVICES 则不再覆盖。
   cuda_device: 3
 
   mixed_precision: fp16
   gradient_accumulation_steps: 1
 
   batch_size: 32
-  epochs: 300
+  epochs: 400
   lr: 1.0e-4
   weight_decay: 0.01
   betas: [0.9, 0.999]

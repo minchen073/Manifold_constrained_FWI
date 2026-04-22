@@ -9,18 +9,32 @@ Uses ``DDIMPipelineOpenFWI`` (noise shape from ``wrapper.spatial``). Same forwar
 
 Denormalization: ``v (m/s) = x * velocity_scale_m_s + velocity_center_m_s``.
 
+Config auto-discovery order (when ``--config`` is omitted):
+  1. ``<run_dir>/config_used.yaml``  (sibling of the checkpoint folder)
+  2. ``training/configs/curvevel_b_ddpm.yaml``
+  3. Hardcoded defaults (center=3000, scale=1500).
+
 Example::
 
   cd Manifold_constrained_FWI
   python scripts/sample_ddim_curvevel_b.py \\
-    --checkpoint training/runs/curvevel_b_ddpm_20260402_010301/checkpoint_epoch_0300
+    --checkpoint training/runs/curvevel_b_ddpm_20260410_194949/checkpoint_epoch_0200
 """
 
 from __future__ import annotations
 
+import os
+import sys
+import warnings
+
+# ── Suppress noisy import-time messages (TF / xformers / CUDA) ────────────────
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="google")
+
 import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -33,22 +47,35 @@ _REPO_ROOT = _MANIFOLD_ROOT.parent
 _CURVE_VEL_B = _REPO_ROOT / "CurveVelB"
 if str(_CURVE_VEL_B) not in sys.path:
     sys.path.insert(0, str(_CURVE_VEL_B))
-from diffusers_torch_compat import ensure_diffusers_custom_ops_safe  # noqa: E402
-
-ensure_diffusers_custom_ops_safe()
-
 if str(_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(_TRAINING_DIR))
 
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-from diffusers import DDIMScheduler, DDIMPipeline, DDPMScheduler, DDPMPipeline, UNet2DModel
-from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
-from diffusers.utils import is_torch_xla_available
-from diffusers.utils.torch_utils import randn_tensor
-
-from openfwi_unet_wrapper import OpenFWIUNetWrapper, load_openfwi_checkpoint
+# ── Redirect OS-level stderr (fd 2) to /dev/null during library imports ────────
+# This silences C++-level messages from TF/absl/CUDA that can't be caught by
+# Python's warnings module. Python-level stderr is restored in the finally block
+# so any real ImportError traceback is still visible.
+_null_fd = os.open(os.devnull, os.O_WRONLY)
+_saved_fd2 = os.dup(2)
+_saved_py_stderr = sys.stderr
+os.dup2(_null_fd, 2)
+os.close(_null_fd)
+sys.stderr = open(os.devnull, "w")
+try:
+    from diffusers_torch_compat import ensure_diffusers_custom_ops_safe  # noqa: E402
+    ensure_diffusers_custom_ops_safe()
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
+    from diffusers import DDIMScheduler, DDIMPipeline, DDPMScheduler, DDPMPipeline, UNet2DModel
+    from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
+    from diffusers.utils import is_torch_xla_available
+    from diffusers.utils.torch_utils import randn_tensor
+    from openfwi_unet_wrapper import OpenFWIUNetWrapper, load_openfwi_checkpoint
+finally:
+    sys.stderr.close()
+    sys.stderr = _saved_py_stderr
+    os.dup2(_saved_fd2, 2)
+    os.close(_saved_fd2)
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -86,7 +113,7 @@ class DDIMPipelineOpenFWI(DDIMPipeline):
         image = randn_tensor(
             image_shape,
             generator=generator,
-            device=self._execution_device,
+            device=self.device,
             dtype=w.unet.dtype,
         )
 
@@ -112,12 +139,27 @@ class DDIMPipelineOpenFWI(DDIMPipeline):
         return ImagePipelineOutput(images=image)
 
 
+def _load_script_config() -> dict:
+    """Read scripts/config_sample_ddim.yaml (if present) → argparse-compatible defaults.
+
+    Keys must match argparse dest names (underscores, not dashes).
+    null / None values are ignored so the argparse built-in default applies.
+    CLI arguments always override the config file.
+    """
+    cfg_path = _SCRIPTS_DIR / "config_sample_ddim.yaml"
+    if not cfg_path.is_file():
+        return {}
+    with open(cfg_path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    return {k.replace("-", "_"): v for k, v in raw.items() if v is not None}
+
+
 def _default_checkpoint() -> Path:
     return (
         _TRAINING_DIR
         / "runs"
-        / "curvevel_b_ddpm_20260402_010301"
-        / "checkpoint_epoch_0300"
+        / "curvevel_b_ddpm_20260410_194949"
+        / "checkpoint_epoch_0200"
     )
 
 
@@ -213,13 +255,20 @@ def _velocity_norm_from_yaml(cfg_path: Path) -> tuple[float, float]:
     return c, s
 
 
-def _resolve_training_yaml_path(config_arg: str | None) -> Path:
-    cfg_yaml = Path(config_arg) if config_arg else _TRAINING_DIR / "configs" / "curvevel_b_ddpm.yaml"
-    if not cfg_yaml.is_absolute():
-        c1 = (Path.cwd() / cfg_yaml).resolve()
-        c2 = (_TRAINING_DIR / cfg_yaml).resolve()
-        cfg_yaml = c1 if c1.is_file() else c2
-    return cfg_yaml
+def _resolve_training_yaml_path(config_arg: str | None, run_dir: Path | None = None) -> Path:
+    if config_arg is not None:
+        cfg_yaml = Path(config_arg)
+        if not cfg_yaml.is_absolute():
+            c1 = (Path.cwd() / cfg_yaml).resolve()
+            c2 = (_TRAINING_DIR / cfg_yaml).resolve()
+            cfg_yaml = c1 if c1.is_file() else c2
+        return cfg_yaml
+    # Auto-discovery: 1) run_dir/config_used.yaml  2) training/configs/curvevel_b_ddpm.yaml
+    if run_dir is not None:
+        candidate = (run_dir / "config_used.yaml").resolve()
+        if candidate.is_file():
+            return candidate
+    return (_TRAINING_DIR / "configs" / "curvevel_b_ddpm.yaml").resolve()
 
 
 def main() -> None:
@@ -228,6 +277,7 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog="DDIM sampling; checkpoint scheduler is DDPM table used to build DDIMScheduler.",
     )
+    script_cfg = _load_script_config()  # read early; applied after add_argument() calls
     opt = parser.add_argument_group(
         "Options",
         "Paths, DDIM hyperparameters, output, velocity denormalization; see defaults below.",
@@ -237,7 +287,8 @@ def main() -> None:
         type=str,
         default=str(_default_checkpoint()),
         metavar="DIR",
-        help="Directory with unet/ and scheduler/ (relative to cwd, training/, or absolute).",
+        help="Checkpoint directory containing model.pt + scheduler/ "
+             "(relative to cwd or training/; default: curvevel_b_ddpm_20260410_194949/checkpoint_epoch_0200).",
     )
     opt.add_argument(
         "--config",
@@ -313,6 +364,10 @@ def main() -> None:
         action="store_true",
         help="With --raw-unet only: no crop, keep 72×72.",
     )
+    # set_defaults MUST come after all add_argument() calls so it can update
+    # each action's .default attribute (not just the internal _defaults dict).
+    if script_cfg:
+        parser.set_defaults(**script_cfg)
     args = parser.parse_args()
 
     ckpt = Path(args.checkpoint)
@@ -325,7 +380,7 @@ def main() -> None:
     if not ckpt.is_dir():
         raise SystemExit(f"Checkpoint directory not found: {ckpt}")
 
-    cfg_yaml = _resolve_training_yaml_path(args.config)
+    cfg_yaml = _resolve_training_yaml_path(args.config, run_dir=ckpt.parent)
 
     if args.velocity_center_m_s is not None and args.velocity_scale_m_s is not None:
         velocity_center_m_s = float(args.velocity_center_m_s)
@@ -350,7 +405,9 @@ def main() -> None:
 
     print(
         f"[DDIM] num_inference_steps={args.steps} eta={args.eta} batch_size={args.batch_size} "
-        f"seed={args.seed} raw_unet={args.raw_unet}\n       checkpoint={ckpt}"
+        f"seed={args.seed} raw_unet={args.raw_unet}\n"
+        f"       checkpoint={ckpt}\n"
+        f"       config={'(not found, using defaults)' if not cfg_yaml.is_file() else str(cfg_yaml)}"
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
