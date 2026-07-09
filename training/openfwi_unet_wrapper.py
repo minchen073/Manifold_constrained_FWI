@@ -55,7 +55,11 @@ class OpenFWIUNetWrapper(nn.Module):
         pad_crop = h == self.spatial and w == self.spatial
 
         if pad_crop:
-            x = F.pad(sample, (1, 1, 1, 1), mode=self.pad_mode)
+            # replication_pad2d is not implemented for fp16/bf16 on CUDA; cast through float32.
+            if sample.dtype != torch.float32:
+                x = F.pad(sample.float(), (1, 1, 1, 1), mode=self.pad_mode).to(sample.dtype)
+            else:
+                x = F.pad(sample, (1, 1, 1, 1), mode=self.pad_mode)
         elif h == self.inner_spatial and w == self.inner_spatial:
             x = sample
         else:

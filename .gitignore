@@ -1,4 +1,12 @@
-# Python
+# ============================================================================
+# Manifold-constrained FWI —— 主实验仓库 .gitignore
+#   仅追踪：主实验脚本 + 方法库(src) + 训练代码(training)
+#   排除：  数据集、实验输出、其余测试脚本/实验、所有大模型权重
+#   说明：  预训练模型权重（model.pt，每个约 275MB）超过 GitHub 100MB 限制，
+#           不入库；仅保留各模型目录下的 scheduler_config.json 与代码。
+# ============================================================================
+
+# ---- Python / 环境 ----
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,16 +14,13 @@ __pycache__/
 .eggs/
 dist/
 build/
-
-# uv / 虚拟环境
 .venv/
 .uv/
 
-# 数据集（通常很大）
+# ---- 数据集（很大，本地保留，不入库）----
 data/
 
-# 预训练模型权重
-pretrained_model/
+# ---- 模型权重（很大，本地保留，不入库）----
 *.pt
 *.pth
 *.ckpt
@@ -23,22 +28,31 @@ pretrained_model/
 *.h5
 *.pkl
 
-# 训练输出（checkpoints、tensorboard logs 等）
+# ---- 训练输出（checkpoints / tensorboard 等）----
 training/runs/
+training/runs_v2/
 
-# 实验输出（生成的图像、npy 结果等）
+# ---- 实验输出与测试实验目录（本地保留，不入库）----
+exp/
+experiment/
 **/demo_output/
 **/output/
-exp/demos/test_generation/
 
-# 日志
+# ---- scripts：只保留主实验及其配套脚本，其余测试脚本不入库 ----
+/scripts/*
+!/scripts/run_dataset_average.py
+!/scripts/run_4datasets_compare.py
+!/scripts/replot_4datasets.py
+!/scripts/rebuild_dataset_avg_bars.py
+
+# ---- 日志 / 笔记 / 杂项 ----
 *.log
 logs/
-
-# Jupyter
 .ipynb_checkpoints/
 *.ipynb
+findings.md
+flatfault_b_grid.png
 
-# 系统
+# ---- 系统 ----
 .DS_Store
 Thumbs.db

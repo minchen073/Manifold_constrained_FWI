@@ -1,0 +1,139 @@
+# =============================================================================
+# 扩散模型训练 v2：RED-DiffEq 训练配方 + 现有 UNet 架构
+#
+# 与旧版训练的关键区别：
+#   - Sigmoid 噪声调度 (start=-3, end=3, tau=1)
+#   - Adam 优化器 (无 weight decay)，lr=2e-4，constant
+#   - EMA 启用，decay=0.995
+#   - betas=(0.9, 0.99)
+#   - 400,000 训练步
+#   - ε-prediction (不变)
+#
+# 数据集：每个数据集独立训练（不变）
+# =============================================================================
+
+data:
+  # =========================================================================
+  # 数据集选择 — 四个预设（取消注释即可）
+  # =========================================================================
+  # dataset: "FlatVel-B"
+  dataset: "CurveFault-B"
+
+  # --- CurveFault-B (48,000 samples) ---
+  dataset: "CurveFault-B"
+  file_prefixes: [6, 7, 8]
+  file_suffix: "1"
+  train_index_range: [0, 31]
+  test_index_range: [32, 35]
+
+  # --- FlatFault-B (48,000 samples) ---
+  # dataset: "FlatFault-B"
+  # file_prefixes: [6, 7, 8]
+  # file_suffix: "1"
+  # train_index_range: [0, 31]
+  # test_index_range: [32, 35]
+
+  # --- CurveVel-B (24,000 samples) ---
+  # dataset: "CurveVel-B"
+  # file_prefixes: []               # 空列表 = plain 模式 (model{i}.npy)
+  # file_suffix: null               # 不使用
+  # train_index_range: [1, 48]
+  # test_index_range: [49, 60]
+
+  # --- FlatVel-B (24,000 samples) ---
+  # dataset: "FlatVel-B"
+  # file_prefixes: []                 # 空列表 = plain 模式 (model{i}.npy)
+  # # file_prefixes: [6,7,8]                 # 空列表 = plain 模式 (model{i}.npy)
+  # file_suffix: null                 # 不使用
+  # train_index_range: [1, 48]
+  # test_index_range: [49, 60]
+
+  samples_per_file: 500
+  velocity_center_m_s: 3000.0
+  velocity_scale_m_s: 1500.0
+  num_workers: 4
+  pin_memory: true
+
+# UNet 架构：与现有 DDIM 模型完全一致
+unet:
+  load_pretrained_weights: false
+  pretrained_weights_path: null
+  torch_dtype: float32
+  config:
+    _class_name: UNet2DModel
+    act_fn: silu
+    add_attention: true
+    attention_head_dim: 8
+    block_out_channels: [128, 256, 256, 512]
+    center_input_sample: false
+    down_block_types:
+      - DownBlock2D
+      - DownBlock2D
+      - AttnDownBlock2D
+      - DownBlock2D
+    downsample_padding: 1
+    downsample_type: conv
+    dropout: 0.0
+    flip_sin_to_cos: true
+    freq_shift: 0
+    in_channels: 1
+    layers_per_block: 2
+    mid_block_type: UNetMidBlock2D
+    norm_eps: 1.0e-5
+    norm_num_groups: 32
+    out_channels: 1
+    resnet_time_scale_shift: default
+    sample_size: 72
+    time_embedding_type: positional
+    up_block_types:
+      - UpBlock2D
+      - UpBlock2D
+      - AttnUpBlock2D
+      - UpBlock2D
+    upsample_type: conv
+
+# 噪声调度：Sigmoid (与 RED-DiffEq 一致)
+noise_schedule:
+  type: sigmoid
+  num_train_timesteps: 1000
+  sigmoid_start: -3
+  sigmoid_end: 3
+  sigmoid_tau: 1
+
+# 训练超参数：与 RED-DiffEq 一致
+training:
+  output_root: "./runs_v2"
+  run_name: null               # null 则自动生成 "{dataset}_v2"
+
+  seed: 42
+  cuda_device: 0
+
+  mixed_precision: fp16
+  gradient_accumulation_steps: 1
+
+  batch_size: 32
+  total_steps: 400000          # 总训练步数 (RED-DiffEq 最佳 checkpoint)
+
+  lr: 2.0e-4                   # RED-DiffEq 学习率
+  weight_decay: 0.0            # 无 weight decay
+  betas: [0.9, 0.99]           # RED-DiffEq betas
+
+  lr_scheduler: constant       # 无余弦退火
+  lr_warmup_steps: 0           # 无 warmup
+
+  prediction_type: epsilon
+
+  grad_clip: 1.0
+  log_every: 100
+  val_every: 1000              # 每 N 步验证
+  save_every: 50000            # 每 N 步保存 checkpoint
+
+  # EMA
+  use_ema: true
+  ema_decay: 0.995             # RED-DiffEq EMA decay
+
+  enable_xformers: false
+
+  checkpoint_steps: 50000
+  checkpoints_total_limit: 10
+  resume_from_checkpoint: null
